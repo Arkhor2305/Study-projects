@@ -1,0 +1,196 @@
+# KONWERTER
+
+import requests
+import json
+
+SCIEZKA_PLIK_KURSY = "kursy.json"
+URL_NBP_KURSY = f"http://api.nbp.pl/api/exchangerates/tables/a?format=json"
+nazwy_na_kody = {} # mapowanie nazw waluty na kody
+kurs_w_pln = {} # kursy w PLN dla walut
+
+def zaladuj_kursy_z_internetu():
+    return requests.get(URL_NBP_KURSY).json()[0] # pobierz ze strony NBP, używamy [0] bo zwracana jest lista
+
+def zaladuj_kursy_z_pliku():
+    with open(SCIEZKA_PLIK_KURSY, "r") as plik_kursy:
+        return json.load(plik_kursy) # zaladuj dane z pliku json
+
+def zapisz_do_pliku(kursy):
+    with open(SCIEZKA_PLIK_KURSY, "w") as plik_kursy:
+        json.dump(kursy, plik_kursy) # zapisz dane do pliku json
+
+# uzupełnia dane dla PLN
+def uzupelnij_dane(dane: list):
+    kurs_pln_w_pln = {
+        "currency": "polski złoty",
+        "code": "PLN",
+        "mid": 1.0 # 1pln = 1pln
+    }
+    dane["rates"] = [kurs_pln_w_pln] + dane["rates"]
+
+def zaladuj_kursy():
+    # wczytaj z internetu
+    try:
+        print("próba pobrania kursów walut z internetu...")
+        dane = zaladuj_kursy_z_internetu()
+        uzupelnij_dane(dane)
+        zapisz_do_pliku(dane)
+    except:
+        # nie mamy połączenia z internetem, ładujemy z pliku
+        print("próba załadowania z pliku...")
+        try:
+            dane = zaladuj_kursy_z_pliku()
+        except:
+            # nie możemy załadować z pliku i nie mamy połączenia z internetem
+            raise Exception("nie można załadować kursów walut z NBP i nie ma zapisanych danych")
+
+    for kurs in dane["rates"]:
+        nazwa = kurs["currency"]
+        kod = kurs["code"]
+        kurs = kurs["mid"]
+        nazwy_na_kody[nazwa] = kod
+        kurs_w_pln[kod] = kurs
+
+def oblicz_kurs(ilosc, kod_wejsciowy, kod_wyjsciowy):
+    return ilosc * (kurs_w_pln[kod_wejsciowy] / kurs_w_pln[kod_wyjsciowy])
+
+# GUI
+
+from tkinter import *
+from tkinter import messagebox
+import konwerter
+​
+TYTUL_APLIKACJI = "Konwerter walut"
+WYMIARY_OKNA = "800x600"
+​
+def sprobuj_zmienic_na_liczbe(wartosc):
+    try:
+        return float(wartosc)
+    except:
+        return None
+    
+​
+class WyborWaluty(Listbox):
+    def __init__(self, master, lista_walut):
+        self.lista_walut = lista_walut
+        lista_walut_tk = StringVar(value=lista_walut) # w formacie tkinter
+        # listvariable -> przekazuje możliwe opcje do listy
+        # exportselection=False -> nie usunie nam zaznaczenia po kliknięciu poza listę
+        super(WyborWaluty, self).__init__(master, listvariable=lista_walut_tk, height=5, exportselection=False)
+​
+    def wez_kod_waluty(self):
+        try:
+            wybrany_index = self.curselection()[0] # pierwszy element krotki to numer wybranego elementu
+            wybrana_nazwa_waluty = self.lista_walut[wybrany_index] # wybieramy nazwę waluty
+            return konwerter.nazwy_na_kody[wybrana_nazwa_waluty] # wybieramy kod waluty
+        except:
+            return None # jeśli ktoś nie wybierze waluty, zwracamy pustą wartość
+​
+class Aplikacja(Frame):
+​
+    ROZMIAR_ODSTEPU = 5
+​
+    def __init__(self):
+        super(Aplikacja, self).__init__() # wywołanie konstruktora Frame
+        self.zainicjuj_konwerter()
+        self.konfiguruj_aplikacje()
+        self.konfiguruj_zmienne()
+        self.konfiguruj_kontrolki()
+    
+    def zainicjuj_konwerter(self):
+        konwerter.zaladuj_kursy()
+        self.WYBOR_WALUT = tuple(konwerter.nazwy_na_kody.keys()) # zbieramy nazwy walut które są w listach do wyboru
+​
+    def konfiguruj_aplikacje(self):
+        self.master.title(TYTUL_APLIKACJI) 
+        self.master.resizable(False, False) 
+        self.grid() # umiejscowienie naszego okna w nadrzędnym oknie
+​
+    def konfiguruj_zmienne(self):
+        self.ilosc_wejsciowa = StringVar(value="1.00")
+        self.ilosc_wyjsciowa = StringVar(value="...")
+​
+    # zwracamy wartości kontrolek jeśli są prawidłowe
+    def zweryfikuj(self):
+        komunikaty_bledu = []
+        poprawne = True # czy wszystkie dane sa poprawne
+        ilosc = sprobuj_zmienic_na_liczbe(self.ilosc_wejsciowa.get())
+        waluta_wejsciowa = self.kontrolka_waluta_wejsciowa.wez_kod_waluty()
+        waluta_wyjsciowa = self.kontrolka_waluta_docelowa.wez_kod_waluty()
+        if ilosc == None:
+            komunikaty_bledu.append("Nie podano prawidłowej ilości.")
+        if waluta_wejsciowa == None:
+            komunikaty_bledu.append("Nie podano waluty wejściowej.")
+        if waluta_wyjsciowa == None:
+            komunikaty_bledu.append("Nie podano waluty wyjściowej.")
+        
+        if len(komunikaty_bledu) != 0:
+            wiadomosc = "\n".join(komunikaty_bledu) # dodajemy znaki końca linii do każdego komunikatu błędu
+            messagebox.showerror(title="Błąd!", message=wiadomosc) # pokazujemy komunikat błędu
+            poprawne = False
+        return (poprawne, ilosc, waluta_wejsciowa, waluta_wyjsciowa)
+​
+    def oblicz_ilosc(self, event):
+        poprawne, ilosc, waluta_wejsciowa, waluta_docelowa = self.zweryfikuj()
+        if poprawne:
+            wynik = konwerter.oblicz_kurs(ilosc, waluta_wejsciowa, waluta_docelowa)
+            wynik = round(wynik, 2) # zaokrąglenie do 2 miejsc po przecinku
+            wynik_str = str(wynik)
+            self.ilosc_wyjsciowa.set(wynik_str) # zmieniamy wartość kontrolki
+            
+​
+    def konfiguruj_kontrolki(self):
+        # wiersz 1
+        self.kontrolka_tytul = Label(self, text=TYTUL_APLIKACJI, font=("Arial", 24))
+        self.kontrolka_tytul.grid(row=0, column=0, columnspan=3)
+        
+        # wiersz 2
+        self.kontrolka_waluta_wejsciowa_podpis = Label(self, text="Waluta wejściowa:")
+        self.kontrolka_waluta_wejsciowa_podpis.grid(row=1, column=0)
+​
+        self.kontrolka_waluta_docelowa_podpis = Label(self, text="Waluta docelowa:")
+        self.kontrolka_waluta_docelowa_podpis.grid(row=1, column=2)
+​
+        # wiersz 3
+        # padx -> odstępy po lewej i prawej stronie
+        # pady -> odstępy na górze i na dole
+        self.kontrolka_waluta_wejsciowa = WyborWaluty(self, self.WYBOR_WALUT)
+        self.kontrolka_waluta_wejsciowa.grid(row=2, column=0, padx=self.ROZMIAR_ODSTEPU, pady=self.ROZMIAR_ODSTEPU)
+​
+        self.kontrolka_waluta_docelowa = WyborWaluty(self, self.WYBOR_WALUT)
+        self.kontrolka_waluta_docelowa.grid(row=2, column=2, padx=self.ROZMIAR_ODSTEPU, pady=self.ROZMIAR_ODSTEPU)
+​
+        # wiersz 4
+        # sticky -> wyrównanie (N, S, E, W), domyślnie "NSEW" czyli wyrównanie do środka
+        self.kontrolka_ilosc_wejsciowa_podpis = Label(self, text="Ilość: ")
+        self.kontrolka_ilosc_wejsciowa_podpis.grid(row=3, column=0, sticky=W, padx=self.ROZMIAR_ODSTEPU)
+​
+        self.kontrolka_ilosc_wyjsciowa_podpis = Label(self, text="Wynik:")
+        self.kontrolka_ilosc_wyjsciowa_podpis.grid(row=3, column=2, sticky=W, padx=self.ROZMIAR_ODSTEPU)
+​
+        # wiersz 5
+        ODSTEPY_PIONOWE_5_WIERSZA = (0, self.ROZMIAR_ODSTEPU) # usuwamy odstęp na górze w wierszu 5, bo jest już w wierszu 4 i tak ładniej
+​
+        # textvariable -> wartość kontrolki będzie nam się zapisywać i aktualizować na bieżąco
+        self.kontrolka_ilosc_wejsciowa = Entry(self, exportselection=False, textvariable=self.ilosc_wejsciowa)
+        self.kontrolka_ilosc_wejsciowa.grid(row=4, column=0, padx=self.ROZMIAR_ODSTEPU, pady=ODSTEPY_PIONOWE_5_WIERSZA)
+​
+        self.kontrolka_oblicz = Button(self, text="Oblicz")
+        self.kontrolka_oblicz.grid(row=4, column=1, padx=self.ROZMIAR_ODSTEPU, pady=ODSTEPY_PIONOWE_5_WIERSZA)
+        # wykonujemy obliczenie przy naciśnięciu guzika
+        self.kontrolka_oblicz.bind("<ButtonRelease>", self.oblicz_ilosc)
+​
+        self.kontrolka_ilosc_wyjsciowa = Label(self, textvariable=self.ilosc_wyjsciowa)
+        self.kontrolka_ilosc_wyjsciowa.grid(row=4, column=2, padx=self.ROZMIAR_ODSTEPU, pady=ODSTEPY_PIONOWE_5_WIERSZA)
+​
+        # wiersz 6
+        self.kontrolka_wyjscie = Button(self, text="Wyjdź")
+        self.kontrolka_wyjscie.grid(row=5, padx=self.ROZMIAR_ODSTEPU, pady=self.ROZMIAR_ODSTEPU, columnspan=3, sticky="EW")
+        # funkcja quit przyjmuje 0 argumentów więc trzeba zrobić taką lambdę
+        self.kontrolka_wyjscie.bind("<ButtonRelease>", lambda event: self.quit())
+
+#APLIKACJA 
+from gui import Aplikacja
+
+app = Aplikacja()
+app.mainloop() # uruchomienie programu
