@@ -1,0 +1,52 @@
+import numpy as np
+from numpy.linalg import inv
+
+def equations(x):
+    eq1 = np.tan(x[0]) - x[1] - 1
+    eq2 = np.cos(x[0]) - 3 * np.sin(x[1])
+    return np.array([eq1, eq2])
+
+def Jacobian(x):
+    df1_dx = 1 / np.cos(x[0])**2 
+    df1_dy = -1  
+    df2_dx = -np.sin(x[0])  
+    df2_dy = -3 * np.cos(x[1])  
+    return np.array([[df1_dx, df1_dy], [df2_dx, df2_dy]])
+
+def newton_method(f, J, x0, tol=1e-6, max_iter=100):
+    x = x0
+    iter_counts = 0
+    
+    for i in range(max_iter):
+        delta_x = -np.dot(inv(J(x)), f(x))
+        x = x + delta_x
+        iter_counts +=1
+        
+        if np.linalg.norm(delta_x) < tol:
+            return list(x), iter_counts 
+    
+    raise ValueError("Metoda Newtona nie jest zbieżna")
+
+
+initial_guesses = [(0.1, 0.1), (1.0, 1.0), (2, 2)]
+results = []
+iter_counts = []
+
+for i in range(len(initial_guesses)):
+    results.append(newton_method(equations, Jacobian, initial_guesses[i])[0])
+    iter_counts.append(newton_method(equations, Jacobian, initial_guesses[i])[1])
+    
+    
+for j in range(len(initial_guesses)):    
+    print(f"Przybliżone rozwiązanie układu równań x,y = {results[j]}, znalezione po {iter_counts[j]} iteracjach")
+
+
+sifted_results = []
+
+for k in range(len(initial_guesses)):
+    if 0 < results[k][0] < 1.5 and 0 < results[k][1] < 1.5:
+        sifted_results.append(results[k])
+
+print('\n',f"Rozwiązania znalezione w przedziale (0; 1.5): {sifted_results}",'\n')
+print("Sprawdzenie rozwiązań")
+print(equations(sifted_results[0]),'\n',equations(sifted_results[1]))
